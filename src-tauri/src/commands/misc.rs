@@ -5250,13 +5250,13 @@ pub async fn open_provider_terminal(
                 None => {
                     let env_vars =
                         extract_env_vars_from_config(&provider.settings_config, &app_type);
-                    claude_terminal_launch(&env_vars, &providerId)?
+                    claude_terminal_launch(&env_vars)?
                 }
             }
         }
         _ => {
             let env_vars = extract_env_vars_from_config(&provider.settings_config, &app_type);
-            claude_terminal_launch(&env_vars, &providerId)?
+            claude_terminal_launch(&env_vars)?
         }
     };
     if skipPermissions == Some(true) {
@@ -5572,11 +5572,10 @@ fn codex_launch(
 }
 
 /// Claude Code：把卡上的 env 写进临时 settings 文件，`claude --settings <文件>` 启动。
-fn claude_terminal_launch(
-    env_vars: &[(String, String)],
-    provider_id: &str,
-) -> Result<ProviderLaunch, String> {
-    let config_file = unique_temp_path(&format!("claude_{provider_id}"), "json");
+fn claude_terminal_launch(env_vars: &[(String, String)]) -> Result<ProviderLaunch, String> {
+    // 文件名会写进 .bat，不能带供应商 ID：链接导入的 ID 可能含中文，cmd 按控制台代码页
+    // 解码 .bat 字节后路径乱码，启动时找不到配置文件，退出时也删不掉这个含 Key 的文件。
+    let config_file = unique_temp_path("claude_settings", "json");
     write_claude_config(&config_file, env_vars)?;
     let config_name = config_file
         .file_name()
@@ -7643,7 +7642,7 @@ mod tests {
     fn claude_terminal_config_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let launch =
-            claude_terminal_launch(&[("ANTHROPIC_AUTH_TOKEN".into(), "t".into())], "p").unwrap();
+            claude_terminal_launch(&[("ANTHROPIC_AUTH_TOKEN".into(), "t".into())]).unwrap();
         let file = &launch.cleanup[0];
         assert_eq!(
             std::fs::metadata(file).unwrap().permissions().mode() & 0o777,
@@ -7656,6 +7655,15 @@ mod tests {
                 file.to_string_lossy().into_owned()
             ]
         );
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn claude_terminal_batch_command_stays_ascii() {
+        let launch =
+            claude_terminal_launch(&[("ANTHROPIC_AUTH_TOKEN".into(), "t".into())]).unwrap();
+        let file = &launch.cleanup[0];
+        assert!(launch.batch_command.is_ascii(), "{}", launch.batch_command);
         std::fs::remove_file(file).unwrap();
     }
 
